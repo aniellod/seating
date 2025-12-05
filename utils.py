@@ -41,7 +41,7 @@ const CONFIG = {
     rows: 20, // Grid rows
     cellSize: 25,
     seatTotal: 250,
-    seatYOffset: 5, // Lower seats by ~1-2cm visually and for targeting
+    seatYOffset: 0, // Keep seats aligned to their grid cell for accurate targeting
     speeds: {
         aisle: 2.0,
         emptySeat: 1.5, // 75%
@@ -475,7 +475,8 @@ function draw() {
     ctx.fillStyle = '#333';
     ctx.fillRect(200, CONFIG.renderOffsetY + 10, 400, 20); // Blackboard
     ctx.fillStyle = '#8B4513';
-    ctx.fillRect(350, CONFIG.renderOffsetY + 35, 100, 30); // Desk
+    // Keep the desk within the front row so it doesn't overlap the first seating row
+    ctx.fillRect(350, CONFIG.renderOffsetY + 25, 100, 18); // Desk
 
     // Draw Entrances
     ctx.fillStyle = '#00cc66';
