@@ -151,16 +151,23 @@ class Student {
         // Move
         const moveStep = speed * dt * 60; // Normalize to frame rate
 
-        // Simple collision avoidance: pause if another student is very close to target tile
-        const blocking = students.some(other => {
+        // Simple collision avoidance: slow down and avoid stepping into an occupied tile
+        const blockingStudent = students.find(other => {
             if (other === this || other.state === 'seated') return false;
             const ox = other.gridX;
             const oy = other.gridY;
             return Math.abs(ox - targetNode.x) + Math.abs(oy - targetNode.y) === 0;
         });
 
-        if (blocking) {
-            return; // wait until tile is free
+        // When traffic is present, apply a slowdown instead of coming to a full stop.
+        // This reduces gridlock while still preventing two students from occupying the
+        // same grid tile at the same time.
+        if (blockingStudent) {
+            speed *= 0.75; // 25% reduction when congestion is detected
+            // If we'd land on the occupied tile this frame, hold position instead.
+            if (dist < speed * dt * 60) {
+                return;
+            }
         }
 
         if (dist < moveStep) {
