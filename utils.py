@@ -41,7 +41,7 @@ const CONFIG = {
     rows: 20, // Grid rows
     cellSize: 25,
     seatTotal: 250,
-    seatYOffset: 0, // Keep seats aligned to their grid cell for accurate targeting
+    seatYOffset: 6, // Lower seats within their cell for better visual alignment
     speeds: {
         aisle: 2.0,
         emptySeat: 1.5, // 75%
@@ -229,7 +229,15 @@ class Student {
             ctx.strokeStyle = this.color;
             ctx.setLineDash([3, 3]);
             ctx.lineWidth = 2;
-            ctx.moveTo(this.x, this.y);
+            // Snap starting point to the current grid center so the path remains
+            // perfectly vertical/horizontal instead of angling from the student's
+            // in-between position.
+            const startNode = grid[this.gridY] ? grid[this.gridY][this.gridX] : null;
+            const startYOffset = startNode && startNode.type === 'seat' ? CONFIG.seatYOffset : 0;
+            ctx.moveTo(
+                gridCenterX(this.gridX),
+                gridCenterY(this.gridY) + startYOffset
+            );
             for (let i = this.pathIndex; i < this.path.length; i++) {
                 const node = this.path[i];
                 const offsetY = node.type === 'seat' ? CONFIG.seatYOffset : 0;
