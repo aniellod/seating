@@ -9,10 +9,13 @@ def get_game_html():
         canvas { display: block; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; padding: 10px; box-sizing: border-box; display: flex; justify-content: space-between; background: rgba(255,255,255,0.9); border-bottom: 1px solid #ddd; }
         .stat-box { font-weight: bold; font-size: 14px; color: #333; }
+        .stat-sub { font-size: 12px; color: #555; font-weight: normal; }
         button { padding: 8px 16px; background: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background: #ff3333; }
         button.start { background: #00cc66; }
         button.start:hover { background: #00bb55; }
+        button.secondary { background: #444; margin-left: 10px; }
+        button.secondary:hover { background: #222; }
         #status-msg { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 5px 15px; border-radius: 15px; font-size: 12px; display: none; }
     </style>
 </head>
@@ -20,9 +23,12 @@ def get_game_html():
 
 <div id="game-container">
     <div id="ui-layer">
-        <div class="stat-box">⏱️ Time: <span id="timer">00:00</span></div>
-        <div class="stat-box">🪑 Seated: <span id="seated-count">0</span>/250</div>
-        <button id="action-btn" class="start" onclick="toggleGame()">START SIMULATION</button>
+        <div class="stat-box">⏱️ Time: <span id="timer">00:00</span><br><span class="stat-sub">Best: <span id="high-score">--:--</span></span></div>
+        <div class="stat-box">🪑 Seated: <span id="seated-count">0</span>/250<br><span class="stat-sub">Progress: <span id="progress">0</span>%</span></div>
+        <div>
+            <button id="action-btn" class="start" onclick="toggleGame()">START SIMULATION</button>
+            <button id="pause-btn" class="secondary" onclick="togglePause()" disabled>PAUSE</button>
+        </div>
     </div>
     <canvas id="simCanvas" width="800" height="600"></canvas>
     <div id="status-msg">Computing Paths...</div>
@@ -48,11 +54,15 @@ let grid = [];
 let students = [];
 let seats = [];
 let isRunning = false;
+let isPaused = false;
 let startTime;
+let pausedAt = 0;
 let animationId;
 let seatedCount = 0;
 let spawnTimer = 0;
 let lastTime = 0;
+let highScore = null;
+let failTriggered = false;
 
 // Entrances (Grid coordinates)
 const ENTRANCES = [
@@ -92,9 +102,10 @@ class Student {
         this.targetSeat = targetSeat;
         this.path = [];
         this.pathIndex = 0;
-        this.state = 'entering'; // entering, moving, seated
+        this.state = 'entering'; // entering, moving, seated, paused
         this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
-        
+        this.entryDelay = 0.5 + Math.random() * 0.5;
+
         // Calculate initial path
         this.recalculatePath();
     }
@@ -107,6 +118,13 @@ class Student {
 
     update(dt) {
         if (this.state === 'seated') return;
+
+        // Entrance delay
+        if (this.state === 'entering') {
+            this.entryDelay -= dt;
+            if (this.entryDelay > 0) return;
+            this.state = 'moving';
+        }
 
         if (this.path.length === 0) return;
 
@@ -132,7 +150,19 @@ class Student {
 
         // Move
         const moveStep = speed * dt * 60; // Normalize to frame rate
-        
+
+        // Simple collision avoidance: pause if another student is very close to target tile
+        const blocking = students.some(other => {
+            if (other === this || other.state === 'seated') return false;
+            const ox = other.gridX;
+            const oy = other.gridY;
+            return Math.abs(ox - targetNode.x) + Math.abs(oy - targetNode.y) === 0;
+        });
+
+        if (blocking) {
+            return; // wait until tile is free
+        }
+
         if (dist < moveStep) {
             this.x = targetX;
             this.y = targetY;
@@ -265,7 +295,10 @@ function getNeighbors(node) {
         let nx = node.x + d[0];
         let ny = node.y + d[1];
         if (nx >= 0 && nx < CONFIG.cols && ny >= 0 && ny < CONFIG.rows) {
-            neighbors.push(grid[ny][nx]);
+            const candidate = grid[ny][nx];
+            // Students cannot go vertically into seats; they must enter from sides
+            if (candidate.type === 'seat' && node.x === candidate.x) continue;
+            neighbors.push(candidate);
         }
     }
     return neighbors;
@@ -323,13 +356,15 @@ function init() {
     canvas = document.getElementById('simCanvas');
     ctx = canvas.getContext('2d');
     initGrid();
+    loadHighScore();
     draw();
 }
 
 // --- Main Loop ---
 function gameLoop(timestamp) {
     if (!isRunning) return;
-    
+    if (isPaused) return;
+
     let dt = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
     
@@ -339,12 +374,7 @@ function gameLoop(timestamp) {
         if (spawnTimer > 0.5) { // Spawn every 0.5s
             spawnTimer = 0;
             // Find random empty seat that hasn't been assigned
-            let availableSeats = seats.filter(s => !s.assigned);
-            if (availableSeats.length > 0) {
-                let target = availableSeats[Math.floor(Math.random() * availableSeats.length)];
-                target.assigned = true;
-                students.push(new Student(target));
-            }
+            assignSeatToNewStudent();
         }
     }
 
@@ -355,16 +385,20 @@ function gameLoop(timestamp) {
     draw();
 
     // Timer
-    let elapsed = Math.floor((Date.now() - startTime) / 1000);
-    let mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-    let secs = (elapsed % 60).toString().padStart(2, '0');
-    document.getElementById('timer').innerText = `${mins}:${secs}`;
+    updateTimer();
 
     // Check End Condition
+    if (!failTriggered && seatedCount === 0 && elapsedSeconds() >= 10) {
+        setStatus('Failure: No seats filled after 10 seconds.', true);
+        endGame(false);
+        return;
+    }
+
     if (seatedCount >= seats.length) {
-        isRunning = false;
-        document.getElementById('action-btn').innerText = "RESET (Finished!)";
-        document.getElementById('action-btn').className = "start";
+        const finishedIn = elapsedSeconds();
+        maybeSetHighScore(finishedIn);
+        setStatus(`Success: All seats filled in ${formatTime(finishedIn)}.`, true);
+        endGame(true);
         return;
     }
 
@@ -416,12 +450,14 @@ function draw() {
 
 function updateUI() {
     document.getElementById('seated-count').innerText = seatedCount;
+    const progress = Math.floor((seatedCount / seats.length) * 100);
+    document.getElementById('progress').innerText = progress;
 }
 
 // --- Controls ---
 window.toggleGame = function() {
     let btn = document.getElementById('action-btn');
-    
+
     if (!isRunning && btn.innerText.includes("START")) {
         // Start Game
         initGrid(); // Reset grid
@@ -429,25 +465,119 @@ window.toggleGame = function() {
         seatedCount = 0;
         updateUI();
         isRunning = true;
+        isPaused = false;
+        failTriggered = false;
+        document.getElementById('status-msg').style.display = 'none';
         startTime = Date.now();
         lastTime = performance.now();
         btn.innerText = "RESET";
         btn.className = ""; // Remove start class (make it red)
+        document.getElementById('pause-btn').disabled = false;
+        document.getElementById('pause-btn').innerText = 'PAUSE';
         gameLoop(performance.now());
     } else {
         // Reset Game
-        isRunning = false;
-        cancelAnimationFrame(animationId);
-        initGrid();
-        students = [];
-        seatedCount = 0;
-        updateUI();
-        draw();
-        document.getElementById('timer').innerText = "00:00";
-        btn.innerText = "START SIMULATION";
-        btn.className = "start";
+        endGame(false, true);
     }
 };
+
+window.togglePause = function() {
+    if (!isRunning) return;
+    isPaused = !isPaused;
+    const pauseBtn = document.getElementById('pause-btn');
+    if (isPaused) {
+        pauseBtn.innerText = 'RESUME';
+        pausedAt = Date.now();
+    } else {
+        pauseBtn.innerText = 'PAUSE';
+        const pauseDuration = Date.now() - pausedAt;
+        startTime += pauseDuration; // Keep timer accurate
+        lastTime = performance.now();
+        animationId = requestAnimationFrame(gameLoop);
+    }
+};
+
+function endGame(isSuccess, fromReset) {
+    isRunning = false;
+    isPaused = false;
+    failTriggered = !isSuccess && !fromReset;
+    cancelAnimationFrame(animationId);
+    initGrid();
+    students = [];
+    seatedCount = 0;
+    updateUI();
+    draw();
+    document.getElementById('timer').innerText = "00:00";
+    document.getElementById('action-btn').innerText = isSuccess ? "RESET (Finished!)" : "START SIMULATION";
+    document.getElementById('action-btn').className = "start";
+    document.getElementById('pause-btn').disabled = true;
+}
+
+function updateTimer() {
+    const elapsed = elapsedSeconds();
+    document.getElementById('timer').innerText = formatTime(elapsed);
+}
+
+function elapsedSeconds() {
+    return Math.floor((Date.now() - startTime) / 1000);
+}
+
+function formatTime(totalSeconds) {
+    const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const secs = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${mins}:${secs}`;
+}
+
+function setStatus(message, show) {
+    const status = document.getElementById('status-msg');
+    status.innerText = message;
+    status.style.display = show ? 'block' : 'none';
+}
+
+function loadHighScore() {
+    const stored = localStorage.getItem('auditorium_high_score');
+    if (stored) {
+        highScore = parseInt(stored, 10);
+        document.getElementById('high-score').innerText = formatTime(highScore);
+    }
+}
+
+function maybeSetHighScore(seconds) {
+    if (highScore === null || seconds < highScore) {
+        highScore = seconds;
+        localStorage.setItem('auditorium_high_score', seconds.toString());
+        document.getElementById('high-score').innerText = formatTime(seconds);
+    }
+}
+
+function assignSeatToNewStudent() {
+    let availableSeats = seats.filter(s => !s.assigned);
+    if (availableSeats.length === 0) return;
+
+    let target = availableSeats[Math.floor(Math.random() * availableSeats.length)];
+
+    // Friend logic: 1/250 chance new student tries to sit next to previous assignment
+    const recentSeat = students.length > 0 ? students[students.length - 1].targetSeat : null;
+    const chance = Math.floor(Math.random() * 250) === 0;
+    if (chance && recentSeat) {
+        const neighborOptions = [
+            {x: recentSeat.x - 1, y: recentSeat.y},
+            {x: recentSeat.x + 1, y: recentSeat.y}
+        ];
+        const neighbor = neighborOptions.find(pos => {
+            return seats.some(s => !s.assigned && s.x === pos.x && s.y === pos.y);
+        });
+        if (neighbor) {
+            const buddySeat = seats.find(s => !s.assigned && s.x === neighbor.x && s.y === neighbor.y);
+            if (buddySeat) {
+                target = buddySeat;
+            }
+        }
+    }
+
+    target.assigned = true;
+    students.push(new Student(target));
+}
 
 // Initialize on load
 window.onload = init;

@@ -54,9 +54,10 @@ with st.sidebar:
     - **Aisles:** 100% Speed
     - **Empty Seats:** 75% Speed
     - **Occupied Seats:** 25% Speed (Congestion)
-    
+    - Students pause briefly at the entrance and avoid occupying the same tile while moving.
+
     **Controls:**
-    Use the buttons inside the game window to Start or Reset the simulation.
+    Use the buttons inside the game window to Start, Pause/Resume, or Reset the simulation.
     """)
     
     st.info("Note: This simulation uses a custom HTML5 Canvas engine embedded in Streamlit to achieve 60FPS smooth animations.")
