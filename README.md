@@ -69,16 +69,17 @@ The Auditorium Seating Game is a 2D web-based simlulation where the computer mus
     - Occupied seats: 75% speed penalty (25% of base speed)
   - Collision avoidance with other moving students
     - Students cannot occupy the same place when travelling
-    - One of the students stop until the other has moved away
+    - When such a collision occurs, one of the students will reduce their speed by 25%.
   - Smooth animations for realistic movement
 - **Entrance Behavior:**
   - Students spawn at randomly selected entrance
   - Initial pause at entrance (0.5-1 second) before starting movement
   - Natural walking animation upon starting movement
 - **Seating Behavior:**
-  - Students do not sit next to another if there's an empty seat
+  - Students must occupy seats with no occupied neighbour.
   - There's a 1/250 chance than two consecutive spawned students are friends.
   - If they are friends, they will try to sit horizontally next to eachother.
+  - Friends are colored differently so we can identify them.
 
 ### 3.4 Timer System
 - **Timer Display:**
@@ -90,7 +91,6 @@ The Auditorium Seating Game is a 2D web-based simlulation where the computer mus
   - Game time display
   - Seated students counter (X/250)
   - Start/Reset button
-  - Pause/Resume functionality
   - Game status indicators
 
 ### 3.6 Game States
