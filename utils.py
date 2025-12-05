@@ -41,11 +41,14 @@ const CONFIG = {
     rows: 20, // Grid rows
     cellSize: 25,
     seatTotal: 250,
+    seatYOffset: 5, // Lower seats by ~1-2cm visually and for targeting
     speeds: {
         aisle: 2.0,
         emptySeat: 1.5, // 75%
         occupiedSeat: 0.5 // 25%
-    }
+    },
+    avoidanceRadius: 22, // Pixel radius for collision separation
+    avoidanceWeight: 0.6
 };
 
 // --- Game State ---
@@ -130,11 +133,12 @@ class Student {
 
         const targetNode = this.path[this.pathIndex];
         const targetX = targetNode.x * CONFIG.cellSize + CONFIG.cellSize/2;
-        const targetY = targetNode.y * CONFIG.cellSize + CONFIG.cellSize/2;
+        const targetYOffset = targetNode.type === 'seat' ? CONFIG.seatYOffset : 0;
+        const targetY = targetNode.y * CONFIG.cellSize + CONFIG.cellSize/2 + targetYOffset;
 
         const dx = targetX - this.x;
         const dy = targetY - this.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
+        const dist = Math.sqrt(dx*dx + dy*dy) || 0.0001;
 
         // Determine speed based on current tile
         const currentGridX = Math.floor(this.x / CONFIG.cellSize);
@@ -149,26 +153,47 @@ class Student {
         }
 
         // Move
-        const moveStep = speed * dt * 60; // Normalize to frame rate
+        let moveStep = Math.max(speed * dt * 60, 0.05); // Normalize to frame rate, avoid micro-steps
 
-        // Simple collision avoidance: slow down and avoid stepping into an occupied tile
-        const blockingStudent = students.find(other => {
-            if (other === this || other.state === 'seated') return false;
-            const ox = other.gridX;
-            const oy = other.gridY;
-            return Math.abs(ox - targetNode.x) + Math.abs(oy - targetNode.y) === 0;
+        // Separation-based collision avoidance to keep students flowing instead of stopping
+        let avoidanceX = 0;
+        let avoidanceY = 0;
+        let avoidanceCount = 0;
+
+        students.forEach(other => {
+            if (other === this || other.state === 'seated') return;
+            const ax = this.x - other.x;
+            const ay = this.y - other.y;
+            const d2 = ax*ax + ay*ay;
+            const radius = CONFIG.avoidanceRadius;
+            if (d2 > 0 && d2 < radius * radius) {
+                const d = Math.sqrt(d2);
+                const strength = (radius - d) / radius;
+                avoidanceX += (ax / d) * strength;
+                avoidanceY += (ay / d) * strength;
+                avoidanceCount++;
+            }
         });
 
-        // When traffic is present, apply a slowdown instead of coming to a full stop.
-        // This reduces gridlock while still preventing two students from occupying the
-        // same grid tile at the same time.
-        if (blockingStudent) {
-            speed *= 0.75; // 25% reduction when congestion is detected
-            // If we'd land on the occupied tile this frame, hold position instead.
-            if (dist < speed * dt * 60) {
-                return;
-            }
+        if (avoidanceCount > 0) {
+            const weight = CONFIG.avoidanceWeight;
+            const desiredX = dx / dist + (avoidanceX / avoidanceCount) * weight;
+            const desiredY = dy / dist + (avoidanceY / avoidanceCount) * weight;
+            const desiredLen = Math.sqrt(desiredX*desiredX + desiredY*desiredY) || 1;
+            const normalizedX = desiredX / desiredLen;
+            const normalizedY = desiredY / desiredLen;
+            this.x += normalizedX * moveStep;
+            this.y += normalizedY * moveStep;
+        } else if (dist < moveStep) {
+            this.x = targetX;
+            this.y = targetY;
+        } else {
+            this.x += (dx / dist) * moveStep;
+            this.y += (dy / dist) * moveStep;
         }
+
+        this.gridX = Math.floor(this.x / CONFIG.cellSize);
+        this.gridY = Math.floor(this.y / CONFIG.cellSize);
 
         if (dist < moveStep) {
             this.x = targetX;
@@ -176,18 +201,13 @@ class Student {
             this.gridX = targetNode.x;
             this.gridY = targetNode.y;
             this.pathIndex++;
-            
+
             if (this.pathIndex >= this.path.length) {
                 this.state = 'seated';
                 this.targetSeat.node.occupied = true;
                 seatedCount++;
                 updateUI();
             }
-        } else {
-            this.x += (dx / dist) * moveStep;
-            this.y += (dy / dist) * moveStep;
-            this.gridX = Math.floor(this.x / CONFIG.cellSize);
-            this.gridY = Math.floor(this.y / CONFIG.cellSize);
         }
     }
 
@@ -202,9 +222,11 @@ class Student {
             ctx.lineWidth = 2;
             ctx.moveTo(this.x, this.y);
             for (let i = this.pathIndex; i < this.path.length; i++) {
+                const node = this.path[i];
+                const offsetY = node.type === 'seat' ? CONFIG.seatYOffset : 0;
                 ctx.lineTo(
-                    this.path[i].x * CONFIG.cellSize + CONFIG.cellSize/2,
-                    this.path[i].y * CONFIG.cellSize + CONFIG.cellSize/2
+                    node.x * CONFIG.cellSize + CONFIG.cellSize/2,
+                    node.y * CONFIG.cellSize + CONFIG.cellSize/2 + offsetY
                 );
             }
             ctx.stroke();
@@ -421,13 +443,14 @@ function draw() {
             let node = grid[y][x];
             let px = x * CONFIG.cellSize;
             let py = y * CONFIG.cellSize;
-            
+
             if (node.type === 'seat') {
+                const seatOffsetY = CONFIG.seatYOffset;
                 ctx.fillStyle = node.occupied ? '#ff4b4b' : '#e0e0e0'; // Red if occupied, Grey if empty
-                ctx.fillRect(px + 2, py + 2, CONFIG.cellSize - 4, CONFIG.cellSize - 4);
+                ctx.fillRect(px + 2, py + 2 + seatOffsetY, CONFIG.cellSize - 4, CONFIG.cellSize - 4);
                 // Armrests
                 ctx.fillStyle = '#999';
-                ctx.fillRect(px + 2, py + CONFIG.cellSize - 4, CONFIG.cellSize - 4, 2);
+                ctx.fillRect(px + 2, py + CONFIG.cellSize - 4 + seatOffsetY, CONFIG.cellSize - 4, 2);
             } else if (node.type === 'front') {
                 ctx.fillStyle = '#d1d1d1';
                 ctx.fillRect(px, py, CONFIG.cellSize, CONFIG.cellSize);
