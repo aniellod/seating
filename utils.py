@@ -48,8 +48,17 @@ const CONFIG = {
         occupiedSeat: 0.5 // 25%
     },
     avoidanceRadius: 22, // Pixel radius for collision separation
-    avoidanceWeight: 0.6
+    avoidanceWeight: 0.6,
+    renderOffsetY: 30 // Shift entire seating grid downward for better centering
 };
+
+// --- Utility helpers ---
+const gridCenterX = (x) => x * CONFIG.cellSize + CONFIG.cellSize / 2;
+const gridCenterY = (y) => y * CONFIG.cellSize + CONFIG.cellSize / 2 + CONFIG.renderOffsetY;
+const gridOriginX = (x) => x * CONFIG.cellSize;
+const gridOriginY = (y) => y * CONFIG.cellSize + CONFIG.renderOffsetY;
+const pixelToGridX = (x) => Math.floor(x / CONFIG.cellSize);
+const pixelToGridY = (y) => Math.floor((y - CONFIG.renderOffsetY) / CONFIG.cellSize);
 
 // --- Game State ---
 let canvas, ctx;
@@ -97,8 +106,8 @@ class Student {
     constructor(targetSeat) {
         // Pick random entrance
         const entrance = ENTRANCES[Math.floor(Math.random() * ENTRANCES.length)];
-        this.x = entrance.x * CONFIG.cellSize + CONFIG.cellSize/2;
-        this.y = entrance.y * CONFIG.cellSize + CONFIG.cellSize/2;
+        this.x = gridCenterX(entrance.x);
+        this.y = gridCenterY(entrance.y);
         this.gridX = entrance.x;
         this.gridY = entrance.y;
         
@@ -132,17 +141,17 @@ class Student {
         if (this.path.length === 0) return;
 
         const targetNode = this.path[this.pathIndex];
-        const targetX = targetNode.x * CONFIG.cellSize + CONFIG.cellSize/2;
+        const targetX = gridCenterX(targetNode.x);
         const targetYOffset = targetNode.type === 'seat' ? CONFIG.seatYOffset : 0;
-        const targetY = targetNode.y * CONFIG.cellSize + CONFIG.cellSize/2 + targetYOffset;
+        const targetY = gridCenterY(targetNode.y) + targetYOffset;
 
         const dx = targetX - this.x;
         const dy = targetY - this.y;
         const dist = Math.sqrt(dx*dx + dy*dy) || 0.0001;
 
         // Determine speed based on current tile
-        const currentGridX = Math.floor(this.x / CONFIG.cellSize);
-        const currentGridY = Math.floor(this.y / CONFIG.cellSize);
+        const currentGridX = pixelToGridX(this.x);
+        const currentGridY = pixelToGridY(this.y);
         let speed = CONFIG.speeds.aisle;
         
         if (currentGridX >= 0 && currentGridX < CONFIG.cols && currentGridY >= 0 && currentGridY < CONFIG.rows) {
@@ -192,8 +201,8 @@ class Student {
             this.y += (dy / dist) * moveStep;
         }
 
-        this.gridX = Math.floor(this.x / CONFIG.cellSize);
-        this.gridY = Math.floor(this.y / CONFIG.cellSize);
+        this.gridX = pixelToGridX(this.x);
+        this.gridY = pixelToGridY(this.y);
 
         if (dist < moveStep) {
             this.x = targetX;
@@ -225,8 +234,8 @@ class Student {
                 const node = this.path[i];
                 const offsetY = node.type === 'seat' ? CONFIG.seatYOffset : 0;
                 ctx.lineTo(
-                    node.x * CONFIG.cellSize + CONFIG.cellSize/2,
-                    node.y * CONFIG.cellSize + CONFIG.cellSize/2 + offsetY
+                    gridCenterX(node.x),
+                    gridCenterY(node.y) + offsetY
                 );
             }
             ctx.stroke();
@@ -441,8 +450,8 @@ function draw() {
     for (let y = 0; y < CONFIG.rows; y++) {
         for (let x = 0; x < CONFIG.cols; x++) {
             let node = grid[y][x];
-            let px = x * CONFIG.cellSize;
-            let py = y * CONFIG.cellSize;
+            let px = gridOriginX(x);
+            let py = gridOriginY(y);
 
             if (node.type === 'seat') {
                 const seatOffsetY = CONFIG.seatYOffset;
@@ -461,17 +470,17 @@ function draw() {
             }
         }
     }
-    
+
     // Draw Professor Area
     ctx.fillStyle = '#333';
-    ctx.fillRect(200, 10, 400, 20); // Blackboard
+    ctx.fillRect(200, CONFIG.renderOffsetY + 10, 400, 20); // Blackboard
     ctx.fillStyle = '#8B4513';
-    ctx.fillRect(350, 35, 100, 30); // Desk
-    
+    ctx.fillRect(350, CONFIG.renderOffsetY + 35, 100, 30); // Desk
+
     // Draw Entrances
     ctx.fillStyle = '#00cc66';
     ENTRANCES.forEach(e => {
-        ctx.fillRect(e.x * CONFIG.cellSize, e.y * CONFIG.cellSize + 15, CONFIG.cellSize, 10);
+        ctx.fillRect(gridOriginX(e.x), gridOriginY(e.y) + 15, CONFIG.cellSize, 10);
     });
 
     // Draw Students
